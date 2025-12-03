@@ -1,0 +1,90 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - stage
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+env:
+  TERRAFORM_VERSION: 1.12.0
+  ENV_DIR: ${{ github.base_ref == 'main' && 'prod' || github.base_ref }}
+
+jobs:
+  terraform-plan:
+    runs-on: ubuntu-latest
+    environment: ${{ github.base_ref == 'main' && 'prod' || github.base_ref }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_AWS_ACCESS_KEY: ${{ secrets.TF_VAR_AWS_ACCESS_KEY }}
+      TF_VAR_AWS_SECRET_KEY: ${{ secrets.TF_VAR_AWS_SECRET_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Setup tf-summarize
+        uses: kishaningithub/setup-tf-summarize@v2
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./envs/${{ env.ENV_DIR }}
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan -input=false -no-color
+        working-directory: ./envs/${{ env.ENV_DIR }}
+
+      - name: Convert Plan to JSON
+        run: terraform show -json tfplan > tfplan.json
+        working-directory: ./envs/${{ env.ENV_DIR }}
+
+      - name: Generate tf-summarize markdown
+        run: tf-summarize -md tfplan.json > plan.md
+        working-directory: ./envs/${{ env.ENV_DIR }}
+
+      - name: Comment Plan on PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('./envs/${{ env.ENV_DIR }}/plan.md', 'utf8');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes('Terraform Plan Summary')
+            );
+
+            const output = `## Terraform Plan Summary for \`${{ github.base_ref }}\`\n${plan}`;
+
+            if (botComment) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+              });
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output,
+            });

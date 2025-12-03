@@ -1,0 +1,79 @@
+name: deployterraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Selecciona el entorno (dev, stage, prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Export environment variables
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+          echo "TF_VAR_AWS_ACCESS_KEY=${{ secrets.TF_VAR_AWS_ACCESS_KEY }}" >> $GITHUB_ENV
+          echo "TF_VAR_AWS_SECRET_KEY=${{ secrets.TF_VAR_AWS_SECRET_KEY }}" >> $GITHUB_ENV
+
+      - name: Debug env variables
+        run: |
+          echo "DEBUG: AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+          echo "DEBUG: AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:0:4}********"
+          echo "DEBUG: TF_VAR_AWS_ACCESS_KEY=$TF_VAR_AWS_ACCESS_KEY"
+          echo "DEBUG: TF_VAR_AWS_SECRET_KEY=${TF_VAR_AWS_SECRET_KEY:0:4}********"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform Init
+        working-directory: ./envs/${{ inputs.environment }}
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ./envs/${{ inputs.environment }}
+        run: terraform validate
+
+      - name: Terraform Plan (save output)
+        working-directory: ./envs/${{ inputs.environment }}
+        run: terraform plan -out=tfplan
+
+      - name: Convert plan to JSON
+        working-directory: ./envs/${{ inputs.environment }}
+        run: terraform show -json tfplan > tfplan.json
+
+      - name: Setup tf-summarize
+        uses: kishaningithub/setup-tf-summarize@v2
+
+      - name: Generate tf-summarize Markdown report
+        working-directory: ./envs/${{ inputs.environment }}
+        run: |
+          tf-summarize -md tfplan.json > tfplan.md
+          echo "## Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          cat tfplan.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        working-directory: ./envs/${{ inputs.environment }}
+        run: terraform apply -auto-approve
+
+      - name: Terraform Output
+        working-directory: ./envs/${{ inputs.environment }}
+        run: terraform output -json
