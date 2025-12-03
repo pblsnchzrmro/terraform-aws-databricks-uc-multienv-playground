@@ -1,11 +1,15 @@
 name: Terraform Plan
 
+# Workflow disabled - uncomment to enable automatic runs on PRs
+# on:
+#   pull_request:
+#     branches:
+#       - dev
+#       - stage
+#       - main
+
 on:
-  pull_request:
-    branches:
-      - dev
-      - stage
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read

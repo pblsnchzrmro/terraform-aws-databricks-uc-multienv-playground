@@ -1,11 +1,15 @@
 name: Terraform Apply
 
+# Workflow disabled - uncomment to enable automatic runs on push
+# on:
+#   push:
+#     branches:
+#       - dev
+#       - stage
+#       - main
+
 on:
-  push:
-    branches:
-      - dev
-      - stage
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
